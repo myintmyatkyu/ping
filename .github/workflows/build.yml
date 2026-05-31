@@ -19,7 +19,7 @@ jobs:
           dotnet-version: '9.0.x'
 
       - name: Build
-        run: dotnet build
+        run: dotnet build Api/Api.csproj
 
       - name: Test
-        run: dotnet test
+        run: dotnet test Api/Api.csproj
