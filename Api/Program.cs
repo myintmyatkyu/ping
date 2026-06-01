@@ -1,9 +1,50 @@
 using System.Diagnostics;
+using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddHttpClient();
 
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = 429; // Too Many Requests
+
+    // POLICY 1: Fixed Window — max 3 requests per 10 seconds
+    options.AddFixedWindowLimiter("fixed", o =>
+    {
+        o.PermitLimit = 3;
+        o.Window = TimeSpan.FromSeconds(10);
+        o.QueueLimit = 0; // reject immediately, no queue
+    });
+
+    // POLICY 2: Sliding Window — max 3 requests per 10 seconds, smoother
+    options.AddSlidingWindowLimiter("sliding", o =>
+    {
+        o.PermitLimit = 3;
+        o.Window = TimeSpan.FromSeconds(10);
+        o.SegmentsPerWindow = 5; // splits window into 5 segments for smoothness
+        o.QueueLimit = 0;
+    });
+
+    // POLICY 3: Token Bucket — bucket of 5, refills 1 token/second
+    options.AddTokenBucketLimiter("token-bucket", o =>
+    {
+        o.TokenLimit = 5;           // burst up to 5
+        o.ReplenishmentPeriod = TimeSpan.FromSeconds(1);
+        o.TokensPerPeriod = 1;      // refill 1 per second
+        o.QueueLimit = 0;
+    });
+
+    // POLICY 4: Concurrency — max 2 running at the same time
+    options.AddConcurrencyLimiter("concurrency", o =>
+    {
+        o.PermitLimit = 2;   // only 2 concurrent requests allowed
+        o.QueueLimit = 0;    // 3rd request gets 429 immediately
+    });
+});
+
 var app = builder.Build();
+app.UseRateLimiter();
 
 app.MapGet("/", () => "Hi this is Ping Ping");
 
@@ -198,6 +239,37 @@ app.MapGet("/async/cancel", async (CancellationToken ct) =>
         return new { result = "cancelled", note = "stopped as soon as client disconnected" };
     }
 });
+
+// ---------------------------------------------------------------
+// RATE LIMITER DEMOS
+// ---------------------------------------------------------------
+
+// Fixed window: max 3 requests per 10 seconds
+app.MapGet("/rate/fixed", () =>
+{
+    return new { policy = "fixed-window", message = "request allowed", time = DateTime.UtcNow };
+}).RequireRateLimiting("fixed");
+
+// Sliding window: max 3 requests per 10 seconds, no burst at boundary
+app.MapGet("/rate/sliding", () =>
+{
+    return new { policy = "sliding-window", message = "request allowed", time = DateTime.UtcNow };
+}).RequireRateLimiting("sliding");
+
+// Token bucket: burst 5, then 1 per second
+app.MapGet("/rate/token-bucket", () =>
+{
+    return new { policy = "token-bucket", message = "request allowed", time = DateTime.UtcNow };
+}).RequireRateLimiting("token-bucket");
+
+// Concurrency: max 2 running simultaneously — simulates heavy DB query
+app.MapGet("/rate/concurrency", async (CancellationToken ct) =>
+{
+    Console.WriteLine($"[concurrency] request started — {DateTime.UtcNow:HH:mm:ss}");
+    await Task.Delay(3000, ct); // simulate 3 second heavy query
+    Console.WriteLine($"[concurrency] request finished — {DateTime.UtcNow:HH:mm:ss}");
+    return new { policy = "concurrency", message = "heavy query done", time = DateTime.UtcNow };
+}).RequireRateLimiting("concurrency");
 
 app.Run();
 
