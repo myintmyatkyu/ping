@@ -155,5 +155,49 @@ app.MapGet("/async/healthy", async () =>
     return new { result = "done", note = "50 operations ran, threads were free the whole time" };
 });
 
+// ---------------------------------------------------------------
+// DEMO 5a: NO cancellation — ignores client disconnect
+// Hit with curl, press Ctrl+C — server keeps logging for 10 seconds
+// ---------------------------------------------------------------
+app.MapGet("/async/no-cancel", async () =>
+{
+    Console.WriteLine("[no-cancel] started");
+
+    for (int i = 1; i <= 10; i++)
+    {
+        await Task.Delay(1000); // simulates DB/HTTP work each second
+        Console.WriteLine($"[no-cancel] step {i}/10 — still running...");
+    }
+
+    Console.WriteLine("[no-cancel] finished");
+    return new { result = "done", note = "ran all 10 steps even if client disconnected" };
+});
+
+// ---------------------------------------------------------------
+// DEMO 5b: WITH cancellation — stops when client disconnects
+// Hit with curl, press Ctrl+C — server stops immediately
+// ---------------------------------------------------------------
+app.MapGet("/async/cancel", async (CancellationToken ct) =>
+{
+    Console.WriteLine("[cancel] started");
+
+    try
+    {
+        for (int i = 1; i <= 10; i++)
+        {
+            await Task.Delay(1000, ct); // cancellation token passed — stops if client disconnects
+            Console.WriteLine($"[cancel] step {i}/10");
+        }
+
+        Console.WriteLine("[cancel] finished");
+        return new { result = "done", note = "completed all 10 steps" };
+    }
+    catch (OperationCanceledException)
+    {
+        Console.WriteLine("[cancel] client disconnected — stopped immediately, resources freed");
+        return new { result = "cancelled", note = "stopped as soon as client disconnected" };
+    }
+});
+
 app.Run();
 
